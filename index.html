@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mirror Fit</title>
+<meta name="description" content="Upload a photo, get a pixel avatar dressed like you, and place it in your room in AR.">
+<meta name="theme-color" content="#130f20">
+<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&family=Onest:wght@400..700&display=swap">
+<style>
+/* Layout: a late-night dressing room for a pixel character. Photo + colour card left, big isometric stage centre, wardrobe tiles right.
+   One committed dark look, so the pixel avatar always sits on the same indigo floor. */
+:root{
+  color-scheme:dark;
+  --bg:#130f20; --panel:#1c172e; --panel-2:#241e3b; --line:#352d54; --line-2:#4a4072;
+  --ink:#f1ecff; --muted:#a69dc6; --faint:#776e98;
+  --accent:#ffb35c; --accent-ink:#2a1804; --accent-soft:rgba(255,179,92,.14);
+  --ok:#86e3b6; --warn:#ffcf70; --err:#ff8f8f;
+  --stage-a:#2e2656; --stage-b:#120e1f; --tile-a:#3b3463; --tile-b:#332c58;
+  --f-pixel:"Pixelify Sans", "Courier New", ui-monospace, monospace;
+  --f-body:"Onest", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --r:16px;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--bg); color:var(--ink)}
+body{font-family:var(--f-body); font-size:15px; line-height:1.5; padding-inline:16px; padding-block:18px 36px; -webkit-font-smoothing:antialiased}
+button{font-family:inherit; color:inherit}
+
+/* Header */
+.top{max-width:1440px; margin:0 auto 16px; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 20px}
+.brand{display:flex; align-items:center; gap:14px}
+.mark{width:34px; height:34px; position:relative; flex:none}
+.mark i{position:absolute; width:12px; height:12px; background:var(--accent)}
+.mark i:nth-child(1){left:11px; top:0}
+.mark i:nth-child(2){left:0; top:11px; background:#c98a46}
+.mark i:nth-child(3){left:22px; top:11px; background:#ffd29b}
+.mark i:nth-child(4){left:11px; top:22px; background:#8f5f2f}
+.brand h1{font-family:var(--f-pixel); font-weight:700; font-size:30px; line-height:1; margin:0; letter-spacing:.01em}
+.brand p{margin:3px 0 0; color:var(--muted); font-size:13.5px}
+.privacy{font-size:12.5px; color:var(--muted); max-width:44ch; text-align:right}
+@media (max-width:760px){ .privacy{text-align:left} }
+
+/* App grid */
+.app{max-width:1440px; margin:0 auto; display:grid; grid-template-columns:330px minmax(0,1fr) 370px; gap:16px; align-items:start}
+@media (max-width:1180px){ .app{grid-template-columns:330px minmax(0,1fr)} .wardrobe{grid-column:1 / -1} }
+@media (max-width:760px){ .app{grid-template-columns:minmax(0,1fr)} .stage-card{order:1} .photo-card{order:2} .wardrobe{order:3} }
+
+.card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); min-width:0}
+.card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:14px 16px 0}
+.label{font-family:var(--f-pixel); font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
+
+/* Photo card */
+.photo-card{display:flex; flex-direction:column; gap:14px; padding-bottom:16px}
+.mirror{margin:0 16px; border-radius:12px; background:var(--panel-2); border:1px dashed var(--line-2); padding:8px; display:flex; justify-content:center; position:relative}
+.mirror.drag{border-color:var(--accent); background:var(--accent-soft)}
+.photo-wrap{position:relative; max-width:100%; touch-action:none}
+.photo-wrap canvas{display:block; width:100%; height:100%; border-radius:8px}
+.tag{position:absolute; left:8px; top:8px; font-family:var(--f-pixel); font-size:11px; letter-spacing:.06em; text-transform:uppercase; background:rgba(19,15,32,.85); color:var(--ink); padding:3px 7px; border-radius:4px}
+.marker{position:absolute; width:24px; height:24px; margin:-12px 0 0 -12px; border-radius:50%; border:3px solid var(--accent);
+  background:var(--c,#999); box-shadow:0 0 0 2px rgba(10,8,18,.7), 0 3px 8px rgba(0,0,0,.4); cursor:grab; padding:0; touch-action:none}
+.marker:active{cursor:grabbing}
+.marker:focus-visible{outline:3px solid var(--ink); outline-offset:3px}
+.marker span{position:absolute; left:28px; top:50%; transform:translateY(-50%); white-space:nowrap; font-family:var(--f-pixel); font-size:11px;
+  background:rgba(19,15,32,.88); color:var(--ink); padding:1px 6px; border-radius:4px; pointer-events:none}
+.marker.flip span{left:auto; right:28px}
+.scan{position:absolute; inset:0; border-radius:8px; overflow:hidden; pointer-events:none; background:rgba(19,15,32,.25)}
+.scan i{position:absolute; left:0; right:0; height:22%; top:-22%; background:linear-gradient(to bottom, transparent, rgba(255,179,92,.35) 70%, var(--accent) 71%, transparent 74%); animation:sweep 1.8s linear infinite}
+@keyframes sweep{to{top:100%}}
+
+.actions{display:flex; gap:8px; padding:0 16px; flex-wrap:wrap}
+.btn{font:600 14px/1 var(--f-body); border-radius:10px; padding:12px 15px; border:1px solid var(--line-2); background:var(--panel-2); color:var(--ink); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.5; cursor:default}
+.btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); flex:1}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn:focus-visible,.tab:focus-visible,.tile:focus-visible,.icon-btn:focus-visible,.seg button:focus-visible{outline:3px solid var(--ink); outline-offset:2px}
+.btn svg{width:16px; height:16px}
+
+.status{margin:0 16px; display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:10px; background:var(--panel-2); font-size:13.5px; line-height:1.45}
+.status .dot{flex:none; width:10px; height:10px; margin-top:5px; background:var(--muted)}
+.status[data-state="working"] .dot{background:var(--accent); animation:blinkdot 1s steps(2) infinite}
+.status[data-state="done"] .dot{background:var(--ok)}
+.status[data-state="warn"] .dot{background:var(--warn)}
+.status[data-state="error"] .dot{background:var(--err)}
+@keyframes blinkdot{50%{opacity:.2}}
+
+.swatches{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; padding:0 16px}
+.sw{display:flex; align-items:center; gap:10px; padding:6px; border-radius:10px; border:1px solid transparent; min-width:0}
+.sw:hover{background:var(--panel-2)}
+.sw label{position:relative; flex:none; width:34px; height:34px; border-radius:8px; background:var(--c,#999); box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); cursor:pointer}
+.sw label input{position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; border:0; padding:0}
+.sw label:focus-within{outline:3px solid var(--ink); outline-offset:2px}
+.sw .meta{min-width:0; display:flex; flex-direction:column}
+.sw .nm{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.sw .hx{font-family:var(--f-pixel); font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums}
+.sw .ov{font-size:11.5px; color:var(--accent); background:none; border:0; padding:0; cursor:pointer; text-align:left}
+.hint{margin:0 16px; color:var(--faint); font-size:12.5px}
+
+/* Stage */
+.stage-card{overflow:hidden; position:relative}
+.stage{position:relative; min-height:520px; padding:70px 16px 76px; display:flex; align-items:center; justify-content:center;
+  background:
+    repeating-linear-gradient(63.43deg, transparent 0 26px, rgba(255,255,255,.03) 26px 27px),
+    repeating-linear-gradient(-63.43deg, transparent 0 26px, rgba(255,255,255,.03) 26px 27px),
+    radial-gradient(90% 70% at 50% 42%, var(--stage-a), var(--stage-b));
+  touch-action:pan-y; user-select:none}
+#iso{display:block; image-rendering:pixelated; image-rendering:crisp-edges; max-width:100%; cursor:ew-resize}
+.readout{position:absolute; left:14px; top:14px; display:flex; flex-direction:column; gap:6px; max-width:calc(100% - 200px)}
+.readout .src{align-self:flex-start; font-family:var(--f-pixel); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 7px; border-radius:4px; background:var(--accent); color:var(--accent-ink)}
+.readout .src.plain{background:var(--panel-2); color:var(--muted); border:1px solid var(--line)}
+.readout ul{list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:4px}
+.readout li{font-size:12.5px; background:rgba(19,15,32,.6); border:1px solid var(--line); border-radius:6px; padding:3px 8px; white-space:nowrap}
+.readout li b{font-family:var(--f-pixel); font-weight:400; color:var(--muted); margin-right:5px; font-size:11px; letter-spacing:.06em; text-transform:uppercase}
+@media (max-width:560px){ .readout{max-width:calc(100% - 28px); top:62px} }
+.stage-tools{position:absolute; right:14px; top:14px; display:flex; gap:6px}
+.icon-btn{height:40px; min-width:40px; padding:0 12px; border-radius:10px; border:1px solid var(--line-2); background:rgba(36,30,59,.85); color:var(--ink); display:inline-flex; align-items:center; justify-content:center; gap:7px; cursor:pointer; font:600 13px/1 var(--f-body)}
+.icon-btn:hover{border-color:var(--muted)}
+.icon-btn[aria-pressed="true"]{border-color:var(--accent); color:var(--accent)}
+.icon-btn svg{width:18px; height:18px}
+.ar-btn{background:var(--accent)!important; color:var(--accent-ink)!important; border-color:var(--accent)!important}
+.ar-btn:hover{filter:brightness(1.06)}
+.ar{position:fixed; inset:0; z-index:20; background:rgba(8,6,14,.78); display:flex; align-items:center; justify-content:center; padding:16px}
+.ar-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); width:min(980px,100%); max-height:100%; overflow:auto; display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+@media (max-width:760px){ .ar-card{grid-template-columns:minmax(0,1fr)} }
+.ar-view{position:relative; min-height:420px; background:radial-gradient(90% 70% at 50% 40%, var(--stage-a), var(--stage-b))}
+.ar-view model-viewer{position:absolute; inset:0; width:100%; height:100%; --poster-color:transparent; background:transparent}
+.mv-ar{position:absolute; left:50%; bottom:16px; transform:translateX(-50%); padding:14px 20px; font-size:15px}
+.ar-view .ar-msg{position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:13.5px; padding:20px; text-align:center}
+.ar-view .badge{pointer-events:none; position:absolute; left:12px; top:12px; font-family:var(--f-pixel); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:3px 7px; border-radius:4px; background:rgba(19,15,32,.75); color:var(--muted); border:1px solid var(--line)}
+.ar-side{padding:20px; display:flex; flex-direction:column; gap:16px; min-width:0}
+.ar-side h2{font-family:var(--f-pixel); font-weight:700; font-size:24px; margin:0; line-height:1.1}
+.ar-side p{margin:0; color:var(--muted); font-size:13.5px}
+.ar-steps{display:flex; flex-direction:column; gap:12px}
+.ar-step{background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:12px 14px}
+.ar-step b{display:block; font-size:13.5px; margin-bottom:4px}
+.ar-step ol{margin:0; padding-left:18px; color:var(--muted); font-size:13px}
+.ar-step li+li{margin-top:2px}
+.ar-foot{display:flex; gap:8px; flex-wrap:wrap}
+.ar-result{font-size:13px; margin:0}
+.ar-result[data-kind="ok"]{color:var(--ok)} .ar-result[data-kind="err"]{color:var(--err)}
+.phone-up{display:none; background:var(--accent)!important; color:var(--accent-ink)!important; border-color:var(--accent)!important}
+@media (max-width:760px){ .phone-up{display:inline-flex} }
+.turn{position:absolute; left:0; right:0; bottom:16px; display:flex; justify-content:center; align-items:center; gap:14px}
+.dots{display:flex; gap:8px}
+.dots i{width:8px; height:8px; transform:rotate(45deg); background:var(--line-2); display:block}
+.dots i.on{background:var(--accent)}
+
+/* Wardrobe */
+.wardrobe{padding-bottom:16px}
+.tabs{display:flex; gap:4px; padding:12px 12px 0; overflow-x:auto}
+.tab{font-family:var(--f-pixel); font-size:14px; letter-spacing:.04em; padding:9px 12px; border-radius:9px; border:1px solid transparent; background:none; color:var(--muted); cursor:pointer; white-space:nowrap}
+.tab[aria-selected="true"]{background:var(--panel-2); color:var(--ink); border-color:var(--line-2)}
+.tab:hover{color:var(--ink)}
+.tpanel{padding:14px 16px 0; display:flex; flex-direction:column; gap:12px}
+.tiles{display:grid; grid-template-columns:repeat(auto-fill,minmax(98px,1fr)); gap:8px}
+.tile{position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 6px 8px; border-radius:12px; border:1.5px solid var(--line); background:var(--panel-2); cursor:pointer; min-width:0}
+.tile:hover{border-color:var(--line-2)}
+.tile[aria-pressed="true"]{border-color:var(--accent); background:linear-gradient(var(--accent-soft),var(--accent-soft)), var(--panel-2)}
+.tile:disabled{opacity:.35; cursor:not-allowed}
+.tile .thumb{height:80px; width:100%; display:flex; align-items:center; justify-content:center}
+.tile canvas{image-rendering:pixelated; image-rendering:crisp-edges; display:block}
+.tile .tl{font-size:12.5px; font-weight:600; text-align:center; line-height:1.2}
+.tile .auto{position:absolute; top:6px; right:6px; font-family:var(--f-pixel); font-size:10px; letter-spacing:.06em; padding:1px 5px; border-radius:3px; background:var(--accent); color:var(--accent-ink)}
+.note{margin:0; font-size:12.5px; color:var(--faint)}
+.field{display:flex; flex-direction:column; gap:8px}
+.field .lbl{display:flex; justify-content:space-between; font-size:13px; font-weight:600}
+.field output{font-family:var(--f-pixel); color:var(--accent); font-variant-numeric:tabular-nums}
+.seg{display:grid; grid-template-columns:repeat(3,1fr); gap:6px}
+.seg button{padding:10px; border-radius:9px; border:1.5px solid var(--line); background:var(--panel-2); cursor:pointer; font-weight:600; font-size:13.5px}
+.seg button[aria-pressed="true"]{border-color:var(--accent); color:var(--accent)}
+input[type=range]{width:100%; accent-color:var(--accent)}
+
+.shot{position:fixed; inset:0; background:rgba(8,6,14,.72); display:flex; align-items:center; justify-content:center; padding:20px; z-index:10}
+.shot-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:16px; display:flex; flex-direction:column; gap:12px; max-width:min(440px,100%); max-height:100%; overflow:auto}
+.shot-card img{border-radius:10px; background:radial-gradient(90% 70% at 50% 42%, var(--stage-a), var(--stage-b)); width:100%; image-rendering:pixelated}
+.shot-card p{margin:0; font-size:13.5px; color:var(--muted)}
+
+@media (prefers-reduced-motion: reduce){ .scan i,.status .dot{animation:none!important} .scan i{top:40%} }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div>
+      <h1>Mirror Fit</h1>
+      <p>Upload a photo, get a pixel avatar dressed like you.</p>
+    </div>
+  </div>
+  <p class="privacy" id="privacy">Your photo never leaves your device. Everything runs in this page.</p>
+</header>
+
+<div class="app">
+  <!-- Photo -->
+  <section class="card photo-card" aria-labelledby="h-photo">
+    <div class="card-head"><span class="label" id="h-photo">Your photo</span></div>
+    <div class="mirror" id="mirror">
+      <div class="photo-wrap" id="photoWrap">
+        <canvas id="photo" aria-label="Your photo with colour sample points"></canvas>
+        <span class="tag" id="photoTag">Sample</span>
+        <div class="scan" id="scan" hidden><i></i></div>
+      </div>
+    </div>
+    <div class="actions">
+      <label class="btn primary" for="file">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3M5.5 7.5 10 3l4.5 4.5M3 13v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
+        Upload photo<input id="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" hidden>
+      </label>
+      <button class="btn" id="reread" type="button" disabled>Re-detect</button>
+    </div>
+    <div class="status" id="status" data-state="idle" role="status"><span class="dot" aria-hidden="true"></span><span id="statusText">Upload a full-body photo and your avatar gets dressed to match. Then tap View in AR.</span></div>
+    <div class="card-head" style="padding-top:2px"><span class="label">Colours</span></div>
+    <div class="swatches" id="swatches"></div>
+    <p class="hint">Drag a pin on the photo or tap a colour to fix it by hand.</p>
+  </section>
+
+  <!-- Stage -->
+  <section class="card stage-card" aria-label="Your avatar">
+    <div class="stage" id="stage" tabindex="0" aria-label="Avatar. Drag sideways or use the arrow keys to turn it.">
+      <div class="readout" id="readout"><span class="src plain" id="srcTag">Sample outfit</span><ul id="readList"></ul></div>
+      <div class="stage-tools">
+        <label class="icon-btn phone-up" for="file" aria-label="Upload photo">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13V3M5.5 7.5 10 3l4.5 4.5M3 13v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
+        </label>
+        <button class="icon-btn" id="spin" type="button" aria-pressed="false" aria-label="Turntable">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.5 10a6.5 6.5 0 1 1-2-4.7M16.5 3v3.5H13"/></svg>
+        </button>
+        <button class="icon-btn" id="snap" type="button" aria-label="Snapshot">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a1 1 0 0 1 1-1h2.5l1.5-2h4l1.5 2H16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="10" cy="11" r="3"/></svg>
+        </button>
+        <button class="icon-btn ar-btn" id="arOpen" type="button">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2.5 16.5 6v8L10 17.5 3.5 14V6z"/><path d="M3.5 6 10 9.5 16.5 6M10 9.5v8"/></svg>
+          View in AR
+        </button>
+      </div>
+      <canvas id="iso" role="img" aria-label="Isometric pixel avatar"></canvas>
+      <div class="turn">
+        <button class="icon-btn" id="rotL" type="button" aria-label="Turn left"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"/></svg></button>
+        <div class="dots" id="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <button class="icon-btn" id="rotR" type="button" aria-label="Turn right"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"/></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Wardrobe -->
+  <section class="card wardrobe" aria-labelledby="h-ward">
+    <div class="card-head"><span class="label" id="h-ward">Wardrobe</span></div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div id="panels"></div>
+  </section>
+</div>
+
+<div class="ar" id="ar" hidden role="dialog" aria-modal="true" aria-labelledby="arTitle">
+  <div class="ar-card">
+    <div class="ar-view">
+      <model-viewer id="mv" alt="Your Mirror Fit avatar" camera-controls auto-rotate touch-action="pan-y"
+        ar ar-modes="webxr quick-look" ar-placement="floor" ar-scale="auto" shadow-intensity="1" exposure="1.05" interaction-prompt="none">
+        <button slot="ar-button" class="btn primary mv-ar" type="button">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a1 1 0 0 1 1-1h2.5l1.5-2h4l1.5 2H16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="10" cy="11" r="3"/></svg>
+          Open camera
+        </button>
+      </model-viewer>
+      <span class="badge">Drag to turn</span>
+    </div>
+    <div class="ar-side">
+      <div>
+        <h2 id="arTitle">Place your avatar in the room</h2>
+        <p id="arNote" style="margin-top:8px" aria-live="polite"></p>
+      </div>
+      <div class="field"><div class="lbl">Size in AR</div>
+        <div class="seg" id="arSize" style="grid-template-columns:repeat(2,1fr)">
+          <button type="button" data-v="life" aria-pressed="true">Life size</button>
+          <button type="button" data-v="toy" aria-pressed="false">Tabletop · 30 cm</button>
+        </div>
+      </div>
+      <div class="ar-step"><b>In AR</b><ol><li>Move your phone slowly so it finds the floor.</li><li>Drag the avatar to move it, pinch to resize, twist with two fingers to turn it.</li></ol></div>
+      <button class="btn" id="arClose" type="button">Back to the wardrobe</button>
+    </div>
+  </div>
+</div>
+
+<div class="shot" id="shot" hidden role="dialog" aria-label="Avatar snapshot">
+  <div class="shot-card">
+    <img id="shotImg" alt="Snapshot of your avatar">
+    <p>Transparent PNG of your avatar.</p>
+    <div class="actions" style="padding:0"><a class="btn primary" id="shotSave" download="mirror-fit-avatar.png" href="#">Save image</a><button class="btn" id="shotClose" type="button">Close</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $=s=>document.querySelector(s);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- Colour helpers ---------- */
+const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>clamp(Math.round(v),0,255).toString(16).padStart(2,'0')).join('');
+const h2rgb=h=>{h=h.replace('#','');return [0,2,4].map(i=>parseInt(h.substr(i,2),16));};
+const mix=(a,b,t)=>{const p=h2rgb(a),q=h2rgb(b);return toHex(p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t,p[2]+(q[2]-p[2])*t);};
+const shade=(c,t)=>t>=0?mix(c,'#ffffff',t):mix(c,'#000000',-t);
+const cdist=(a,b)=>{const p=h2rgb(a),q=h2rgb(b);return Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2]);};
+const isHex=s=>typeof s==='string'&&/^#[0-9a-f]{6}$/i.test(s.trim());
+function hsl(hex){ let [r,g,b]=h2rgb(hex).map(v=>v/255); const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2; let h=0,s=0;
+  if(mx!==mn){ const d=mx-mn; s=l>.5?d/(2-mx-mn):d/(mx+mn); h=mx===r?(g-b)/d+(g<b?6:0):mx===g?(b-r)/d+2:(r-g)/d+4; h*=60; } return [h,s,l]; }
+
+/* ---------- Options ---------- */
+const OPTIONS={
+  top:[['tee','T-shirt'],['tank','Tank top'],['shirt','Shirt'],['long','Long sleeve'],['sweater','Sweater'],['hoodie','Hoodie'],['jacket','Jacket'],['dress','Dress']],
+  bottom:[['jeans','Jeans'],['trousers','Trousers'],['shorts','Shorts'],['skirt','Skirt']],
+  hair:[['buzz','Buzz cut'],['short','Short'],['long','Long'],['ponytail','Ponytail'],['bun','Bun'],['volume','Curly'],['none','None']],
+  shoes:[['sneakers','Sneakers'],['boots','Boots'],['formal','Formal']],
+  build:[['slim','Slim'],['regular','Regular'],['broad','Broad']],
+};
+const nameOf=(k,v)=>(OPTIONS[k].find(o=>o[0]===v)||[,v])[1];
+const KEYS=[
+  {k:'hair',name:'Hair',fy:0.03},{k:'skin',name:'Skin',fy:0.085},{k:'top',name:'Top',fy:0.30},
+  {k:'under',name:'Under layer',fy:0.30},{k:'bottom',name:'Bottoms',fy:0.62},{k:'shoes',name:'Shoes',fy:0.975},
+];
+const state={
+  pins:{}, sampled:{}, override:{}, auto:{}, source:'sample', summary:'',
+  style:{top:'long', bottom:'jeans', hair:'short', shoes:'sneakers', build:'regular'},
+  height:175
+};
+let det=null;
+
+/* ---------- Photo ---------- */
+const photo=$('#photo'), pctx=photo.getContext('2d',{willReadFrequently:true}), wrap=$('#photoWrap');
+let imgData=null;
+function fitWrap(){ const r=photo.width/photo.height; wrap.style.width=`min(100%, calc(46vh * ${r.toFixed(4)}))`; wrap.style.aspectRatio=`${photo.width} / ${photo.height}`; }
+function rr(c,x,y,w,h,r){c.beginPath();c.roundRect?c.roundRect(x,y,w,h,r):c.rect(x,y,w,h);c.fill();}
+function ell(c,x,y,rx,ry){c.beginPath();c.ellipse(x,y,rx,ry,0,0,Math.PI*2);c.fill();}
+function drawSample(){
+  const W=600,H=900; photo.width=W; photo.height=H; const c=pctx, cx=300;
+  const g=c.createLinearGradient(0,0,0,H); g.addColorStop(0,'#e7e3db'); g.addColorStop(.82,'#ddd8ce'); g.addColorStop(.82,'#b9a990'); g.addColorStop(1,'#a8987e');
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+  const skin='#c99474', hair='#3b2a20', top='#2f7f7a', jeans='#3d5a86', shoe='#f2f0ea';
+  c.fillStyle=jeans; rr(c,cx-62,470,56,370,22); rr(c,cx+6,470,56,370,22); rr(c,cx-70,440,140,90,30);
+  c.fillStyle=shoe; rr(c,cx-78,830,72,34,16); rr(c,cx+6,830,72,34,16);
+  c.fillStyle=top; rr(c,cx-122,190,46,250,22); rr(c,cx+76,190,46,250,22);
+  c.fillStyle=skin; ell(c,cx-99,452,22,26); ell(c,cx+99,452,22,26);
+  c.fillStyle=top; rr(c,cx-88,170,176,300,46);
+  c.fillStyle=skin; rr(c,cx-20,130,40,50,12); ell(c,cx,95,52,62);
+  c.fillStyle=hair; c.beginPath(); c.ellipse(cx,72,56,46,0,Math.PI,2*Math.PI); c.fill(); rr(c,cx-56,60,18,60,9); rr(c,cx+38,60,18,60,9);
+  c.fillStyle='#2a1d17'; ell(c,cx-18,98,4,5); ell(c,cx+18,98,4,5);
+  c.strokeStyle='#8e5a45'; c.lineWidth=3; c.beginPath(); c.arc(cx,112,12,.2*Math.PI,.8*Math.PI); c.stroke();
+  c.strokeStyle='#26605c'; c.lineWidth=6; c.beginPath(); c.arc(cx,172,24,0,Math.PI); c.stroke();
+  fitWrap(); imgData=pctx.getImageData(0,0,W,H);
+  state.source='sample'; detect(); guessFromColours(); finishDetect();
+}
+let uploaded=false;
+function loadFile(file){
+  if(!file || !/^image\//.test(file.type)){ setStatus('error',"That file isn't an image. Try a JPG or PNG."); return; }
+  const url=URL.createObjectURL(file), img=new Image();
+  img.onload=()=>{
+    const s=Math.min(1,1000/Math.max(img.width,img.height));
+    photo.width=Math.round(img.width*s); photo.height=Math.round(img.height*s);
+    pctx.drawImage(img,0,0,photo.width,photo.height); URL.revokeObjectURL(url);
+    $('#photoTag').hidden=true; state.override={}; uploaded=true; $('#reread').disabled=false;
+    fitWrap(); imgData=pctx.getImageData(0,0,photo.width,photo.height);
+    detect(); state.source=guessFromColours()?'colours':'manual'; finishDetect();
+    readWithClaude();
+  };
+  img.onerror=()=>{ URL.revokeObjectURL(url); setStatus('error',"That photo couldn't be opened here. Save it as JPG or PNG and try again."); };
+  img.src=url;
+}
+
+/* ---------- On-device detection (background difference) ---------- */
+function px(x,y){ const i=(y*photo.width+x)*4, d=imgData.data; return [d[i],d[i+1],d[i+2]]; }
+function median(a){ a.sort((x,y)=>x-y); return a[a.length>>1]; }
+function detect(){
+  const W=photo.width, H=photo.height, step=Math.max(1,Math.round(W/180));
+  const R=[],G=[],B=[], band=Math.max(2,Math.round(W*0.03));
+  for(let y=0;y<H;y+=step) for(const x of [0,band,W-1-band,W-1]){ const p=px(x,y); R.push(p[0]);G.push(p[1]);B.push(p[2]); }
+  for(let x=0;x<W;x+=step){ const p=px(x,band); R.push(p[0]);G.push(p[1]);B.push(p[2]); }
+  const bg=[median(R),median(G),median(B)];
+  const cols=Math.ceil(W/step), rows=Math.ceil(H/step), mask=new Uint8Array(cols*rows); let on=0;
+  for(let j=0;j<rows;j++) for(let i=0;i<cols;i++){
+    const p=px(Math.min(W-1,i*step),Math.min(H-1,j*step));
+    if(Math.hypot(p[0]-bg[0],p[1]-bg[1],p[2]-bg[2])>58){ mask[j*cols+i]=1; on++; }
+  }
+  for(let j=0;j<rows;j++){
+    let n=0; for(let i=0;i<cols;i++) n+=mask[j*cols+i];
+    if(n>cols*0.7){
+      const y=Math.min(H-1,j*step), rr_=[],gg=[],bb=[];
+      for(let i=0;i<cols;i++){ const p=px(Math.min(W-1,i*step),y); rr_.push(p[0]);gg.push(p[1]);bb.push(p[2]); }
+      const rb=[median(rr_),median(gg),median(bb)]; let m=0;
+      for(let i=0;i<cols;i++){ const p=px(Math.min(W-1,i*step),y); const v=Math.hypot(p[0]-rb[0],p[1]-rb[1],p[2]-rb[2])>58?1:0; mask[j*cols+i]=v; m+=v; }
+      on+=m-n;
+    }
+  }
+  const frac=on/(cols*rows);
+  let top=0.04*rows, bot=0.97*rows, ok=frac>0.04&&frac<0.8;
+  if(ok){
+    const thr=Math.max(2,cols*0.035), rc=j=>{let n=0; for(let i=Math.floor(cols*.08);i<cols*.92;i++) n+=mask[j*cols+i]; return n;};
+    let t=-1,b=-1;
+    for(let j=0;j<rows;j++) if(rc(j)>=thr){t=j;break;}
+    for(let j=rows-1;j>=0;j--) if(rc(j)>=thr){b=j;break;}
+    if(t>=0&&b-t>rows*0.35){top=t;bot=b;} else ok=false;
+  }
+  det={ok,mask,cols,rows,top,bot};
+  for(const K of KEYS){
+    const jy=top+(bot-top)*K.fy; let cx=0.5;
+    if(ok){
+      let sx=0,n=0;
+      for(let j=Math.max(0,Math.floor(jy)-2);j<=Math.min(rows-1,Math.floor(jy)+2);j++) for(let i=0;i<cols;i++) if(mask[j*cols+i]){sx+=i;n++;}
+      if(n) cx=sx/n/cols;
+      if(K.k==='shoes'){ const s=rowSpan(K.fy); if(s.f>=0) cx=((s.f+(s.f+s.l)/2)/2+.5)/cols; }
+      if(K.k==='bottom'&&hasGap(K.fy)){ const s=rowSpan(K.fy); let e=s.f; while(e+1<cols&&mask[s.j*cols+e+1]) e++; cx=((s.f+e)/2+.5)/cols; }
+    }
+    state.pins[K.k]={x:clamp(cx,.02,.98),y:clamp(jy/rows,.01,.99)};
+  }
+  for(const K of KEYS) state.sampled[K.k]=sampleAt(state.pins[K.k].x,state.pins[K.k].y);
+}
+function rowSpan(fy){
+  const j=clamp(Math.round(det.top+(det.bot-det.top)*fy),0,det.rows-1); let f=-1,l=-1;
+  for(let i=Math.floor(det.cols*.02);i<Math.ceil(det.cols*.98);i++) if(det.mask[j*det.cols+i]){ if(f<0) f=i; l=i; }
+  return {j,f,l};
+}
+function hasGap(fy){ const {j,f,l}=rowSpan(fy); if(f<0) return false; const s=l-f;
+  for(let i=Math.round(f+s*.3);i<=Math.round(l-s*.3);i++) if(!det.mask[j*det.cols+i]) return true; return false; }
+const nX=i=>(i+.5)/det.cols, nY=j=>(j+.5)/det.rows;
+function sampleAt(nx,ny,rf){
+  const W=photo.width,H=photo.height, r=Math.max(2,Math.round(W*(rf||0.016)));
+  const cx=Math.round(nx*(W-1)), cy=Math.round(ny*(H-1)), R=[],G=[],B=[];
+  for(let y=cy-r;y<=cy+r;y++) for(let x=cx-r;x<=cx+r;x++){
+    if(x<0||y<0||x>=W||y>=H||(x-cx)**2+(y-cy)**2>r*r) continue;
+    const p=px(x,y); R.push(p[0]);G.push(p[1]);B.push(p[2]);
+  }
+  return R.length?toHex(median(R),median(G),median(B)):'#999999';
+}
+const colorOf=k=>state.override[k]||state.sampled[k]||'#999999';
+function placeJacketPins(){
+  const u=state.pins.under; let dx=0.09;
+  if(det&&det.ok){ const s=rowSpan(0.32); if(s.f>=0) dx=(s.l-s.f)/det.cols*0.17; }
+  state.pins.top={x:clamp(u.x-dx,0,1),y:u.y}; state.sampled.top=sampleAt(state.pins.top.x,state.pins.top.y);
+}
+
+/* Colour-based outfit guess, used for the sample and whenever Claude can't read the photo */
+function guessFromColours(){
+  const st={}; state.auto={}; state.summary='';
+  if(!det.ok){ return false; }
+  const S=state.sampled, near=(c,a,b)=>cdist(c,a)<cdist(c,b);
+  const fa=rowSpan(0.40), ua=rowSpan(0.22);
+  const fore=fa.f>=0?sampleAt(nX(fa.f+1.5),nY(fa.j),.006):S.top;
+  const upper=ua.f>=0?sampleAt(nX(ua.f+1.5),nY(ua.j),.006):S.top;
+  const sleeve=!near(fore,S.skin,S.top)?'long':(!near(upper,S.skin,S.top)?'short':'none');
+  st.top=sleeve==='long'?'long':sleeve==='short'?'tee':'tank';
+  if(sleeve==='long'){
+    const s=rowSpan(0.32), y=state.pins.under.y, cx=state.pins.under.x, dx=s.f>=0?(s.l-s.f)/det.cols*0.17:0.09;
+    const c=sampleAt(cx,y), sl=sampleAt(cx-dx,y), sr=sampleAt(cx+dx,y);
+    if(cdist(c,sl)>70&&cdist(c,sr)>70&&cdist(sl,sr)<45&&cdist(sl,fore)<60){ st.top='jacket'; state.sampled.under=c; placeJacketPins(); }
+  }
+  if(!(hasGap(0.66)||hasGap(0.74))){
+    if(cdist(state.sampled.top,S.bottom)<45&&st.top!=='jacket') st.top='dress'; else st.bottom='skirt';
+  } else {
+    const s=rowSpan(0.85); let shin=S.bottom;
+    if(s.f>=0){ let e=s.f; while(e+1<det.cols&&det.mask[s.j*det.cols+e+1]) e++; shin=sampleAt(nX((s.f+e)/2),nY(s.j),.008); }
+    if(near(shin,S.skin,S.bottom)) st.bottom='shorts';
+    else { const [h,sa,l]=hsl(S.bottom); st.bottom=(h>=195&&h<=235&&sa>.15&&l>.15&&l<.7)?'jeans':'trousers'; }
+  }
+  if(cdist(S.hair,S.skin)<28) st.hair='none';
+  else {
+    const hd=rowSpan(0.06), nk=rowSpan(0.15); let long=false;
+    if(hd.f>=0){ const c=(hd.f+hd.l)/2, hh=(hd.l-hd.f)/2;
+      for(const sx of [-1,1]){ const x=c+sx*hh*1.1; if(x>0&&x<det.cols&&cdist(sampleAt(nX(x),nY(nk.j),.008),S.hair)<40) long=true; } }
+    st.hair=long?'long':'short';
+  }
+  Object.assign(state.style,st); state.auto={...st};
+  return true;
+}
+function finishDetect(){ renderPins(); syncWardrobe(); applyColors(); }
+
+/* ---------- After a photo is read on this device ---------- */
+function readWithClaude(){
+  setStatus(det.ok?'done':'warn', det.ok
+    ? 'Outfit matched from your photo. If a piece is wrong, tap the right one in the wardrobe.'
+    : "Couldn't separate you from the background. Pick your outfit in the wardrobe, or try a photo against a plain wall.");
+  renderReadout();
+}
+function setStatus(kind,text){ $('#status').dataset.state=kind; $('#statusText').textContent=text; }
+
+/* ---------- Pins ---------- */
+const pinEls={};
+for(const K of KEYS){
+  const b=document.createElement('button');
+  b.type='button'; b.className='marker'; b.setAttribute('aria-label',`${K.name} sample point. Use arrow keys to move.`);
+  b.innerHTML=`<span>${K.name}</span>`; wrap.appendChild(b); pinEls[K.k]=b;
+  let dragging=false, raf=0;
+  const resample=()=>{ delete state.override[K.k]; state.sampled[K.k]=sampleAt(state.pins[K.k].x,state.pins[K.k].y); applyColors(); };
+  b.addEventListener('pointerdown',e=>{dragging=true; b.setPointerCapture(e.pointerId); e.preventDefault();});
+  b.addEventListener('pointermove',e=>{ if(!dragging) return; const r=wrap.getBoundingClientRect();
+    state.pins[K.k]={x:clamp((e.clientX-r.left)/r.width,0,1),y:clamp((e.clientY-r.top)/r.height,0,1)};
+    positionPin(K.k); if(!raf) raf=requestAnimationFrame(()=>{raf=0; resample();}); });
+  b.addEventListener('pointerup',()=>dragging=false); b.addEventListener('pointercancel',()=>dragging=false);
+  b.addEventListener('keydown',e=>{ const d={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key]; if(!d) return;
+    e.preventDefault(); const p=state.pins[K.k]; p.x=clamp(p.x+d[0]*.01,0,1); p.y=clamp(p.y+d[1]*.01,0,1); positionPin(K.k); resample(); });
+}
+function positionPin(k){ const p=state.pins[k], el=pinEls[k]; el.style.left=(p.x*100)+'%'; el.style.top=(p.y*100)+'%'; el.classList.toggle('flip',p.x>.6); }
+function renderPins(){ for(const K of KEYS) positionPin(K.k); }
+
+/* ---------- Swatches ---------- */
+const swEls={};
+for(const K of KEYS){
+  const d=document.createElement('div'); d.className='sw';
+  d.innerHTML=`<label aria-label="${K.name} colour"><input type="color" id="sw-${K.k}"></label><div class="meta"><span class="nm">${K.name}</span><span class="hx"></span><button class="ov" type="button" hidden>Use photo colour</button></div>`;
+  $('#swatches').appendChild(d); swEls[K.k]=d;
+  d.querySelector('input').addEventListener('input',e=>{ state.override[K.k]=e.target.value; applyColors(); });
+  d.querySelector('.ov').addEventListener('click',()=>{ delete state.override[K.k]; applyColors(); });
+}
+function applyColors(){
+  const jacket=state.style.top==='jacket', dress=state.style.top==='dress';
+  swEls.under.hidden=!jacket; pinEls.under.hidden=!jacket; swEls.bottom.hidden=dress; pinEls.bottom.hidden=dress;
+  for(const K of KEYS){
+    const c=colorOf(K.k), el=swEls[K.k];
+    el.querySelector('label').style.setProperty('--c',c);
+    el.querySelector('input').value=c;
+    el.querySelector('.hx').textContent=c.toUpperCase();
+    el.querySelector('.ov').hidden=!state.override[K.k];
+    pinEls[K.k].style.setProperty('--c',state.sampled[K.k]||c);
+  }
+  render(); scheduleThumbs(); renderReadout();
+}
+
+/* ---------- Upload, drop, paste ---------- */
+$('#file').addEventListener('change',e=>{ loadFile(e.target.files[0]); e.target.value=''; });
+const mirror=$('#mirror');
+['dragenter','dragover'].forEach(t=>mirror.addEventListener(t,e=>{e.preventDefault(); mirror.classList.add('drag');}));
+['dragleave','drop'].forEach(t=>mirror.addEventListener(t,e=>{e.preventDefault(); mirror.classList.remove('drag');}));
+mirror.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+window.addEventListener('paste',e=>{ const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/')); if(it) loadFile(it.getAsFile()); });
+$('#reread').addEventListener('click',()=>{ state.override={}; detect(); guessFromColours(); finishDetect(); readWithClaude(); });
+
+/* ---------- Wardrobe UI ---------- */
+const TABS=[['top','Top'],['bottom','Bottoms'],['hair','Hair'],['shoes','Shoes'],['body','Body']];
+const tileEls={top:{},bottom:{},hair:{},shoes:{}}, segEls={};
+(function buildWardrobe(){
+  const tabs=$('#tabs'), panels=$('#panels');
+  TABS.forEach(([k,label],i)=>{
+    const t=document.createElement('button'); t.className='tab'; t.type='button'; t.role='tab'; t.id='tab-'+k;
+    t.setAttribute('aria-controls','panel-'+k); t.setAttribute('aria-selected',String(i===0)); t.textContent=label; tabs.appendChild(t);
+    const p=document.createElement('div'); p.className='tpanel'; p.id='panel-'+k; p.setAttribute('role','tabpanel'); p.setAttribute('aria-labelledby','tab-'+k); p.hidden=i!==0;
+    if(k==='body'){
+      p.innerHTML=`<div class="field"><div class="lbl">Build</div><div class="seg" id="seg-build"></div></div>
+        <div class="field"><div class="lbl"><label for="height">Height</label><output id="hOut">175 cm</output></div>
+        <input id="height" type="range" min="140" max="205" step="1" value="175"></div>`;
+      panels.appendChild(p);
+      const seg=p.querySelector('#seg-build');
+      for(const [v,l] of OPTIONS.build){ const b=document.createElement('button'); b.type='button'; b.textContent=l; b.dataset.v=v; seg.appendChild(b); segEls[v]=b;
+        b.addEventListener('click',()=>{ state.style.build=v; syncWardrobe(); render(); scheduleThumbs(); }); }
+      p.querySelector('#height').addEventListener('input',e=>{ state.height=+e.target.value; $('#hOut').textContent=state.height+' cm'; render(); });
+    } else {
+      const grid=document.createElement('div'); grid.className='tiles'; p.appendChild(grid);
+      if(k==='bottom'){ const n=document.createElement('p'); n.className='note'; n.id='dressNote'; n.textContent='Covered by the dress. Pick another top to choose bottoms.'; n.hidden=true; p.prepend(n); }
+      for(const [v,l] of OPTIONS[k]){
+        const b=document.createElement('button'); b.type='button'; b.className='tile'; b.dataset.v=v;
+        b.innerHTML=`<span class="thumb"><canvas width="1" height="1" aria-hidden="true"></canvas></span><span class="tl">${l}</span><span class="auto" hidden>AUTO</span>`;
+        grid.appendChild(b); tileEls[k][v]=b;
+        b.addEventListener('click',()=>{
+          state.style[k]=v;
+          if(k==='top'&&v==='jacket'){ const t=state.pins.top,u=state.pins.under; if(Math.abs(t.x-u.x)<.02&&Math.abs(t.y-u.y)<.02){ placeJacketPins(); renderPins(); } }
+          syncWardrobe(); applyColors();
+        });
+      }
+      panels.appendChild(p);
+    }
+    t.addEventListener('click',()=>selectTab(k));
+  });
+  tabs.addEventListener('keydown',e=>{
+    const ks=TABS.map(t=>t[0]), cur=ks.findIndex(k=>$('#tab-'+k).getAttribute('aria-selected')==='true');
+    let n=null; if(e.key==='ArrowRight') n=(cur+1)%ks.length; if(e.key==='ArrowLeft') n=(cur-1+ks.length)%ks.length;
+    if(n!==null){ e.preventDefault(); selectTab(ks[n]); $('#tab-'+ks[n]).focus(); }
+  });
+})();
+function selectTab(k){ for(const [t] of TABS){ $('#tab-'+t).setAttribute('aria-selected',String(t===k)); $('#tab-'+t).tabIndex=t===k?0:-1; $('#panel-'+t).hidden=t!==k; } }
+function syncWardrobe(){
+  const dress=state.style.top==='dress';
+  for(const k of ['top','bottom','hair','shoes']) for(const v in tileEls[k]){
+    const b=tileEls[k][v]; b.setAttribute('aria-pressed',String(state.style[k]===v));
+    b.querySelector('.auto').hidden=state.auto[k]!==v;
+    if(k==='bottom') b.disabled=dress;
+  }
+  $('#dressNote').hidden=!dress;
+  for(const v in segEls) segEls[v].setAttribute('aria-pressed',String(state.style.build===v));
+}
+function renderReadout(){
+  const s=state.style, src=$('#srcTag'), list=$('#readList');
+  const edited=['top','bottom','hair','shoes'].some(k=>state.auto[k]&&state.auto[k]!==s[k]);
+  const label={colours:'Matched from photo',manual:'Picked by hand',sample:'Sample outfit'}[state.source]||'';
+  src.textContent=edited&&state.source!=='manual'?label+' · edited':label;
+  src.classList.toggle('plain',state.source!=='colours');
+  const items=[['Top',nameOf('top',s.top)]];
+  if(s.top!=='dress') items.push(['Bottoms',nameOf('bottom',s.bottom)]);
+  items.push(['Hair',nameOf('hair',s.hair)],['Shoes',nameOf('shoes',s.shoes)]);
+  list.replaceChildren(...items.map(([a,b])=>{ const li=document.createElement('li'); const bb=document.createElement('b'); bb.textContent=a; li.append(bb,b); return li; }));
+}
+
+/* ---------- Voxel avatar ---------- */
+function buildModel(st,blink){
+  const M=new Map(); let part='';
+  const C={skin:colorOf('skin'),hair:colorOf('hair'),top:colorOf('top'),bot:colorOf('bottom'),shoe:colorOf('shoes'),under:colorOf('under')};
+  const K=(x,y,z)=>x+','+y+','+z;
+  const set=(x,y,z,c)=>M.set(K(x,y,z),{c,p:part}), del=(x,y,z)=>M.delete(K(x,y,z)), has=(x,y,z)=>M.has(K(x,y,z));
+  const paint=(x,y,z,c)=>{ const v=M.get(K(x,y,z)); if(v) v.c=c; };
+  const box=(x0,x1,y0,y1,z0,z1,c)=>{ for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)for(let z=z0;z<=z1;z++) set(x,y,z,c); };
+  const W={slim:7,regular:9,broad:11}[st.build]||9, hw=(W-1)/2;
+  const L=Math.round(15+(state.height-175)/11);
+  const top=st.top, dress=top==='dress', bottom=dress?'dress':st.bottom;
+  const longSleeve=['long','shirt','sweater','hoodie','jacket'].includes(top);
+  const legs=[[-3,-1],[1,3]];
+  // Shoes
+  part='shoes'; let shoeTop=1;
+  for(const [x0,x1] of legs){
+    const mid=(x0+x1)/2;
+    if(st.shoes==='boots'){ const sole=shade(C.shoe,-.5);
+      box(x0,x1,0,0,-1,2,sole); box(x0,x1,1,1,-1,2,C.shoe); box(x0,x1,2,4,-1,1,C.shoe);
+      for(let x=x0;x<=x1;x++) set(x,4,1,shade(C.shoe,.12)); set(mid,3,1,shade(C.shoe,-.2)); shoeTop=4; }
+    else if(st.shoes==='formal'){ const sole=shade(C.shoe,-.55);
+      box(x0,x1,0,0,-1,2,sole); box(x0,x1,1,1,-1,1,C.shoe); set(mid,1,2,C.shoe); set(mid,1,1,shade(C.shoe,.25)); }
+    else { const sole=mix(C.shoe,'#f4f2ec',.8);
+      box(x0,x1,0,0,-1,2,sole); box(x0,x1,1,1,-1,2,C.shoe);
+      set(mid,1,1,mix(C.shoe,'#ffffff',.65)); set(mid,1,0,mix(C.shoe,'#ffffff',.65)); set(x0===-3?x0:x1,1,0,shade(C.shoe,-.25)); }
+  }
+  // Legs
+  part='legs';
+  for(const [x0,x1] of legs){
+    const mid=(x0+x1)/2, outer=x0===-3?x0:x1;
+    for(let y=shoeTop+1;y<L;y++){ const cov=bottom==='jeans'||bottom==='trousers'||(bottom==='shorts'&&y>=L-5); box(x0,x1,y,y,-1,1,cov?C.bot:C.skin); }
+    if(bottom==='jeans'){
+      for(let x=x0;x<=x1;x++) for(let z=-1;z<=1;z++) set(x,shoeTop+1,z,shade(C.bot,.16));
+      const ky=Math.round((shoeTop+L)/2); paint(mid,ky,1,shade(C.bot,.1)); paint(mid,ky+1,1,shade(C.bot,.1));
+      for(let y=shoeTop+2;y<L;y++) paint(outer,y,0,shade(C.bot,-.12));
+    }
+    if(bottom==='trousers') for(let y=shoeTop+1;y<L;y++) paint(mid,y,1,shade(C.bot,-.07));
+    if(bottom==='shorts'){ const a=x0===-3?-4:1, b=x0===-3?-1:4; for(let y=L-5;y<L;y++) box(a,b,y,y,-1,1,y===L-5?shade(C.bot,-.1):C.bot); }
+  }
+  // Hips + belt
+  part=dress?'skirt':'hips';
+  box(-3,3,L,L+1,-2,2,dress?C.top:C.bot);
+  if(bottom==='jeans'||bottom==='trousers'){
+    for(let x=-3;x<=3;x++) for(let z=-2;z<=2;z++) if(Math.abs(x)===3||Math.abs(z)===2) set(x,L+1,z,'#3a2c24');
+    set(0,L+1,2,'#c9a54a');
+  }
+  if(bottom==='skirt'||bottom==='dress'){
+    part=bottom==='dress'?'skirt':'hips';
+    const len=bottom==='dress'?8:6, c=bottom==='dress'?C.top:C.bot;
+    for(let i=0;i<len;i++){ const y=L-1-i, ex=3+Math.floor(i/2), ez=2+Math.floor(i/3);
+      for(let x=-ex;x<=ex;x++) for(let z=-ez;z<=ez;z++){ if(Math.abs(x)===ex&&Math.abs(z)===ez) continue;
+        set(x,y,z, i===len-1?shade(c,-.12):(bottom==='skirt'&&i%2===0&&(x&1)?shade(c,-.05):c)); } }
+  }
+  // Torso + arms
+  part='torso';
+  const T0=L+2, T1=L+11, hy=L+13;
+  box(-hw,hw,T0,T1,-2,2,C.top);
+  for(const s of [-1,1]){
+    const xa=s*(hw+1), xb=s*(hw+2), a0=Math.min(xa,xb), a1=Math.max(xa,xb);
+    for(let y=L;y<=T1;y++){ let c=C.skin; if(y>=L+2){ if(longSleeve) c=C.top; else if((top==='tee'||dress)&&y>=L+8) c=C.top; } box(a0,a1,y,y,-1,0,c); }
+    del(xb,T1,-1); del(xb,T1,0);
+    const cuff=top==='shirt'?shade(C.top,.14):top==='sweater'||top==='hoodie'?shade(C.top,-.14):shade(C.top,-.07);
+    if(longSleeve) for(let x=a0;x<=a1;x++) for(let z=-1;z<=0;z++) set(x,L+2,z,cuff);
+    if(top==='tee'||dress) for(let x=a0;x<=a1;x++) for(let z=-1;z<=0;z++) set(x,L+8,z,shade(C.top,-.08));
+  }
+  part='neck'; box(-1,1,hy-1,hy-1,-1,1,C.skin);
+  part='torso';
+  const ring=(c,skipFront)=>{ for(let x=-2;x<=2;x++) for(let z=-2;z<=2;z++){ if(Math.abs(x)<=1&&Math.abs(z)<=1) continue; if(skipFront&&z===2&&Math.abs(x)<=1) continue; set(x,hy-1,z,c); } };
+  const frontNeck=()=>{ for(let x=-1;x<=1;x++) paint(x,T1,2,C.skin); };
+  if(top==='tee'||top==='long'){ ring(shade(C.top,-.07)); frontNeck(); }
+  if(top==='tank'){ for(let x=-hw;x<=hw;x++) for(let y=T1-1;y<=T1;y++) for(let z=-2;z<=2;z++) if(Math.abs(x)!==2) paint(x,y,z,C.skin);
+    for(let x=-1;x<=1;x++) paint(x,T1-2,2,C.skin); }
+  if(top==='shirt'){ const col=shade(C.top,.16);
+    ring(col,true); set(0,T1,2,C.skin); paint(-1,T1,2,col); paint(1,T1,2,col);
+    for(let y=T0;y<T1;y++) paint(0,y,2,shade(C.top,-.07));
+    for(let y=T0+1;y<T1;y+=2) paint(0,y,2,mix(C.top,'#ffffff',.6));
+    const p0=-hw+1; for(let x=p0;x<=p0+1;x++){ paint(x,T1-4,2,shade(C.top,-.07)); paint(x,T1-3,2,shade(C.top,-.12)); }
+    box(-hw,hw,L+1,L+1,-2,2,C.top); }
+  if(top==='sweater'){ ring(shade(C.top,-.15)); frontNeck();
+    for(let x=-hw;x<=hw;x++) for(let z=-2;z<=2;z++) set(x,T0,z,shade(C.top,(x&1)?-.1:-.17));
+    for(let y=T0+1;y<T1;y++) for(const x of [-2,2]) paint(x,y,2,shade(C.top,(y&1)?.07:.03)); }
+  if(top==='hoodie'){ const dk=shade(C.top,-.12);
+    ring(dk); box(-2,2,hy-2,hy+1,-4,-3,dk);
+    for(let x=-hw;x<=hw;x++) for(let z=-2;z<=2;z++) set(x,T0,z,shade(C.top,-.15));
+    for(let x=-(hw-1);x<=hw-1;x++) for(let y=T0+1;y<=T0+3;y++) paint(x,y,2,shade(C.top,-.07));
+    for(const sx of [-(hw-1),hw-1]) for(let y=T0+2;y<=T0+3;y++) paint(sx,y,2,shade(C.top,-.2));
+    for(const sx of [-1,1]) for(let y=T1-2;y<=T1;y++) set(sx,y,3,mix(C.top,'#ffffff',.6)); }
+  if(top==='jacket'){
+    for(let y=T0;y<=T1;y++) for(let x=-1;x<=1;x++) paint(x,y,2,C.under);
+    for(let x=-1;x<=1;x++) set(x,hy-1,2,C.under);
+    for(let y=T0;y<=T1-4;y++) for(const sx of [-2,2]) paint(sx,y,2,shade(C.top,-.12));
+    for(let y=T1-3;y<=T1;y++) for(const sx of [-2,2]) paint(sx,y,2,shade(C.top,.1));
+    ring(shade(C.top,.08),true);
+    for(let x=-hw;x<=hw;x++) for(let z=-2;z<=2;z++) if(Math.abs(x)>=2) set(x,L+1,z,C.top);
+    paint(-hw+1,T0+3,2,shade(C.top,-.2)); paint(hw-1,T0+3,2,shade(C.top,-.2)); }
+  if(dress){ for(let x=-1;x<=1;x++) for(let y=T1-1;y<=T1;y++) paint(x,y,2,C.skin);
+    for(let x=-hw;x<=hw;x++) for(let z=-2;z<=2;z++) paint(x,T0+2,z,shade(C.top,-.14)); }
+  // Head
+  part='head';
+  for(let x=-3;x<=3;x++) for(let y=hy;y<=hy+7;y++) for(let z=-3;z<=3;z++) if(!has(x,y,z)) set(x,y,z,C.skin);
+  for(let y=hy;y<=hy+7;y++) for(const x of [-3,3]) for(const z of [-3,3]) del(x,y,z);
+  for(let x=-3;x<=3;x++) for(let z=-3;z<=3;z++) if(Math.abs(x)===3||Math.abs(z)===3) del(x,hy+7,z);
+  for(const x of [-3,3]) for(let z=-3;z<=3;z++) del(x,hy,z);
+  for(const sx of [-4,4]) for(let y=hy+2;y<=hy+3;y++) set(sx,y,0,C.skin);
+  set(0,hy+2,4,shade(C.skin,-.04));
+  for(const x of [-2,2]){ if(blink) set(x,hy+3,3,shade(C.skin,-.4)); else { set(x,hy+3,3,'#1d1a1e'); set(x,hy+4,3,'#1d1a1e'); } }
+  for(let x=-1;x<=1;x++) set(x,hy+1,3,mix(C.skin,'#8a3b3b',.4));
+  // Hair
+  part='hair';
+  const H=C.hair, hs=st.hair;
+  const hp=pred=>{ for(let x=-3;x<=3;x++) for(let y=hy;y<=hy+7;y++) for(let z=-3;z<=3;z++){ const v=M.get(K(x,y,z)); if(v&&v.p==='head'&&pred(x,y-hy,z)) v.c=H; } };
+  if(hs==='buzz') hp((x,ry,z)=>ry>=7||(z<=-3&&ry>=4)||(Math.abs(x)===3&&ry>=6)||(z===3&&ry>=7));
+  else if(hs!=='none'){
+    hp((x,ry,z)=>ry>=6||(z<=-2&&ry>=2)||(Math.abs(x)===3&&ry>=4));
+    if(hs!=='volume') box(-2,2,hy+8,hy+8,-3,2,H);
+    if(hs==='long'){ box(-3,3,hy-5,hy+7,-4,-4,H); box(-3,3,hy-5,hy-1,-3,-3,H);
+      for(const sx of [-4,4]) box(sx,sx,hy-1,hy+7,-3,1,H);
+      for(let x=-3;x<=3;x+=2) del(x,hy-5,-4);
+      paint(-2,hy+6,3,shade(H,-.1)); paint(2,hy+6,3,shade(H,-.1)); }
+    if(hs==='ponytail'){ box(-1,1,hy+5,hy+5,-4,-4,shade(H,-.35)); box(-1,1,hy+2,hy+4,-4,-4,H); box(0,0,hy-3,hy+1,-4,-4,H); set(0,hy-3,-4,shade(H,.1)); }
+    if(hs==='bun'){ box(-1,1,hy+9,hy+10,-2,0,H); for(const x of [-1,1]) for(const z of [-2,0]) del(x,hy+10,z); box(-1,1,hy+8,hy+8,-1,-1,shade(H,-.3)); }
+    if(hs==='volume'){
+      for(let x=-5;x<=5;x++) for(let y=hy+2;y<=hy+11;y++) for(let z=-6;z<=5;z++){
+        const e=(x/5.3)**2+((y-hy-6.5)/4.8)**2+((z+.5)/5.2)**2; if(e>1) continue;
+        if(Math.abs(x)<=3&&Math.abs(z)<=3&&y<=hy+7&&has(x,y,z)) continue;
+        if(z>=3&&y<hy+6) continue; if(Math.abs(x)===4&&y<=hy+3&&z>=-1&&z<=1) continue;
+        set(x,y,z,((x*7+y*3+z*5)&3)===0?shade(H,.12):((x+y+z)&1)?H:shade(H,-.06));
+      }
+    }
+  }
+  part='head';
+  const brow=hs==='none'?shade(C.skin,-.35):shade(H,-.1);
+  for(const x of [-2,2]) paint(x,hy+5,3,brow);
+  return M;
+}
+
+/* ---------- Isometric pixel renderer ---------- */
+const A=4, NW=144, NH=252, OX=72, OY=206;
+const iso=$('#iso'); iso.width=NW; iso.height=NH; const ictx=iso.getContext('2d');
+const layer=document.createElement('canvas'); layer.width=NW; layer.height=NH; const lctx=layer.getContext('2d',{willReadFrequently:true});
+let dir=0, blinking=false;
+const shadeCache=new Map();
+function shadesOf(c){ let s=shadeCache.get(c); if(!s){ s=[shade(c,.12),c,shade(c,-.22)]; shadeCache.set(c,s); } return s; }
+function rot(x,z,d){ return d===0?[x,z]:d===1?[z,-x]:d===2?[-x,-z]:[-z,x]; }
+const k3=(x,y,z)=>x+','+y+','+z;
+function rasterVoxel(ctx,sx,sy,f,sh){
+  if(f&1){ ctx.fillStyle=sh[0]; for(let u=0;u<2*A;u++){ const d=u<A?A-1-u:u-A,k=d>>1; ctx.fillRect(sx-A+u,sy+k,1,A-2*k); } }
+  if(f&2){ ctx.fillStyle=sh[1]; for(let u=0;u<A;u++){ const k=(A-1-u)>>1; ctx.fillRect(sx-A+u,sy+A-k,1,A); } }
+  if(f&4){ ctx.fillStyle=sh[2]; for(let u=A;u<2*A;u++){ const k=(u-A)>>1; ctx.fillRect(sx-A+u,sy+A-k,1,A); } }
+}
+function drawVoxels(ctx,list,set){
+  list.sort((a,b)=>(a.x+a.y+a.z)-(b.x+b.y+b.z));
+  for(const v of list){
+    let f=0; if(!set.has(k3(v.x,v.y+1,v.z))) f|=1; if(!set.has(k3(v.x,v.y,v.z+1))) f|=2; if(!set.has(k3(v.x+1,v.y,v.z))) f|=4;
+    if(f) rasterVoxel(ctx,OX+(v.x-v.z)*A,OY+(v.x+v.z)*A/2-(v.y+1)*A,f,shadesOf(v.c));
+  }
+}
+function outline(ctx){
+  const d=ctx.getImageData(0,0,NW,NH), p=d.data, out=[];
+  for(let y=0;y<NH;y++) for(let x=0;x<NW;x++){ const i=y*NW+x; if(p[i*4+3]) continue;
+    if((x>0&&p[(i-1)*4+3])||(x<NW-1&&p[(i+1)*4+3])||(y>0&&p[(i-NW)*4+3])||(y<NH-1&&p[(i+NW)*4+3])) out.push(i); }
+  for(const i of out){ p[i*4]=18; p[i*4+1]=14; p[i*4+2]=30; p[i*4+3]=255; }
+  ctx.putImageData(d,0,0);
+}
+function toList(M,d,parts){
+  const list=[], set=new Set(), cols=new Set();
+  for(const [key,v] of M){ if(parts&&!parts.includes(v.p)) continue;
+    const [x,y,z]=key.split(',').map(Number), [rx,rz]=rot(x,z,d);
+    list.push({x:rx,y,z:rz,c:v.c}); set.add(k3(rx,y,rz)); cols.add(rx+','+rz); }
+  return {list,set,cols};
+}
+function drawCharacter(M,d,parts){ lctx.clearRect(0,0,NW,NH); const {list,set,cols}=toList(M,d,parts); drawVoxels(lctx,list,set); outline(lctx); return cols; }
+function render(){
+  const M=buildModel(state.style,blinking);
+  const css=getComputedStyle(document.documentElement);
+  const ta=css.getPropertyValue('--tile-a').trim()||'#3b3463', tb=css.getPropertyValue('--tile-b').trim()||'#332c58';
+  const cols=drawCharacter(M,dir);
+  const fl=[], fset=new Set(), R=7;
+  for(let x=-R;x<=R;x++) for(let z=-R;z<=R;z++){
+    let c=(((x>>1)+(z>>1))&1)?ta:tb; if(cols.has(x+','+z)||cols.has((x-1)+','+(z+1))) c=shade(c,-.28);
+    fl.push({x,y:-1,z,c}); fset.add(k3(x,-1,z)); }
+  ictx.clearRect(0,0,NW,NH); drawVoxels(ictx,fl,fset); ictx.drawImage(layer,0,0);
+  document.querySelectorAll('#dots i').forEach((el,i)=>el.classList.toggle('on',i===dir));
+}
+
+/* ---------- Wardrobe thumbnails: the avatar wearing each option, cropped to that piece ---------- */
+const THUMB_PARTS={top:['torso','skirt','neck'],bottom:['legs','hips'],hair:['head','hair','neck'],shoes:['shoes']};
+let thumbTimer=0;
+function scheduleThumbs(){ clearTimeout(thumbTimer); thumbTimer=setTimeout(renderThumbs,90); }
+function renderThumbs(){
+  for(const k of ['top','bottom','hair','shoes']) for(const v in tileEls[k]){
+    const st={...state.style,[k]:v};
+    if(k==='bottom'&&st.top==='dress') st.top='long';
+    const M=buildModel(st,false); drawCharacter(M,0,THUMB_PARTS[k]);
+    const d=lctx.getImageData(0,0,NW,NH).data; let x0=NW,y0=NH,x1=-1,y1=-1;
+    for(let y=0;y<NH;y++) for(let x=0;x<NW;x++) if(d[(y*NW+x)*4+3]){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+    const cv=tileEls[k][v].querySelector('canvas'); if(x1<0) continue;
+    const w=x1-x0+1, h=y1-y0+1; cv.width=w; cv.height=h;
+    const c=cv.getContext('2d'); c.clearRect(0,0,w,h); c.drawImage(layer,x0,y0,w,h,0,0,w,h);
+    const fit=Math.min(84/w,76/h), s=fit>=1?Math.floor(fit):fit;
+    cv.style.width=(w*s)+'px'; cv.style.height=(h*s)+'px';
+  }
+}
+
+/* ---------- Stage sizing + interaction ---------- */
+const stage=$('#stage');
+function layout(){
+  const w=stage.clientWidth-32, h=Math.min(window.innerHeight*0.78,800);
+  const s=Math.max(1,Math.floor(Math.min(w/NW,h/NH)));
+  iso.style.width=(NW*s)+'px'; iso.style.height=(NH*s)+'px';
+}
+new ResizeObserver(layout).observe(stage); window.addEventListener('resize',layout);
+const turn=d=>{ dir=(dir+d+4)%4; render(); };
+$('#rotL').addEventListener('click',()=>turn(-1)); $('#rotR').addEventListener('click',()=>turn(1));
+stage.addEventListener('keydown',e=>{ if(e.target!==stage) return; if(e.key==='ArrowLeft'){turn(-1);e.preventDefault();} if(e.key==='ArrowRight'){turn(1);e.preventDefault();} });
+let dragX=null;
+iso.addEventListener('pointerdown',e=>{ dragX=e.clientX; iso.setPointerCapture(e.pointerId); });
+iso.addEventListener('pointermove',e=>{ if(dragX===null) return; const dx=e.clientX-dragX; if(Math.abs(dx)>48){ turn(dx>0?1:-1); dragX=e.clientX; } });
+iso.addEventListener('pointerup',()=>dragX=null); iso.addEventListener('pointercancel',()=>dragX=null);
+let spinTimer=null; const spin=$('#spin');
+spin.addEventListener('click',()=>{ const on=!spinTimer; clearInterval(spinTimer); spinTimer=on?setInterval(()=>turn(1),1100):null; spin.setAttribute('aria-pressed',String(on)); });
+if(!reduceMotion){ (function blinkLoop(){ setTimeout(()=>{ blinking=true; render(); setTimeout(()=>{ blinking=false; render(); blinkLoop(); },150); },2800+Math.random()*2600); })(); }
+
+$('#snap').addEventListener('click',()=>{
+  const big=document.createElement('canvas'); big.width=NW*4; big.height=NH*4;
+  const b=big.getContext('2d'); b.imageSmoothingEnabled=false;
+  drawCharacter(buildModel(state.style,false),dir); b.drawImage(layer,0,0,big.width,big.height);
+  const png=big.toDataURL('image/png'); $('#shotImg').src=png; $('#shotSave').href=png; $('#shot').hidden=false; $('#shotClose').focus(); render();
+});
+$('#shotClose').addEventListener('click',()=>$('#shot').hidden=true);
+$('#shot').addEventListener('click',e=>{ if(e.target.id==='shot') $('#shot').hidden=true; });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') $('#shot').hidden=true; });
+
+/* ---------- AR export: voxel model -> GLB + USDZ, packed in a zip ---------- */
+const linC=v=>{ v/=255; return v<=0.04045?v/12.92:Math.pow((v+0.055)/1.055,2.4); };
+const FACES=[
+  {n:[1,0,0],u:[0,1,0],v:[0,0,1]},{n:[-1,0,0],u:[0,0,1],v:[0,1,0]},
+  {n:[0,1,0],u:[0,0,1],v:[1,0,0]},{n:[0,-1,0],u:[1,0,0],v:[0,0,1]},
+  {n:[0,0,1],u:[1,0,0],v:[0,1,0]},{n:[0,0,-1],u:[0,1,0],v:[1,0,0]},
+];
+let arSize='life';
+function buildMesh(){
+  const M=buildModel(state.style,false), cells=[]; let maxY=0;
+  for(const [key,v] of M){ const [x,y,z]=key.split(',').map(Number); cells.push([x,y,z,v.c]); if(y>maxY) maxY=y; }
+  const heightM=arSize==='toy'?0.3:state.height/100, s=heightM/(maxY+1), h=s/2;
+  const groups=new Map();
+  for(const [x,y,z,c] of cells) for(const f of FACES){
+    if(M.has((x+f.n[0])+','+(y+f.n[1])+','+(z+f.n[2]))) continue;
+    let g=groups.get(c); if(!g){ g={pos:[],nrm:[]}; groups.set(c,g); }
+    const cx=x*s+f.n[0]*h, cy=(y+.5)*s+f.n[1]*h, cz=z*s+f.n[2]*h;
+    for(const [a,b] of [[-1,-1],[1,-1],[1,1],[-1,1]]){
+      g.pos.push(cx+(f.u[0]*a+f.v[0]*b)*h, cy+(f.u[1]*a+f.v[1]*b)*h, cz+(f.u[2]*a+f.v[2]*b)*h);
+      g.nrm.push(f.n[0],f.n[1],f.n[2]);
+    }
+  }
+  return {groups, height:heightM};
+}
+function meshArrays(mesh){
+  let nV=0; for(const g of mesh.groups.values()) nV+=g.pos.length/3;
+  const pos=new Float32Array(nV*3), nrm=new Float32Array(nV*3), col=new Float32Array(nV*3), idx=new Uint32Array(nV/4*6);
+  const min=[1e9,1e9,1e9], max=[-1e9,-1e9,-1e9]; let o=0,q=0;
+  for(const [hex,g] of mesh.groups){
+    const rgb=h2rgb(hex).map(linC), n=g.pos.length/3;
+    for(let i=0;i<n;i++){ for(let k=0;k<3;k++){ const p=g.pos[i*3+k]; pos[(o+i)*3+k]=p; nrm[(o+i)*3+k]=g.nrm[i*3+k]; col[(o+i)*3+k]=rgb[k]; if(p<min[k])min[k]=p; if(p>max[k])max[k]=p; } }
+    for(let i=0;i<n;i+=4){ const v=o+i; idx[q++]=v; idx[q++]=v+1; idx[q++]=v+2; idx[q++]=v; idx[q++]=v+2; idx[q++]=v+3; }
+    o+=n;
+  }
+  return {pos,nrm,col,idx,nV,min,max};
+}
+/* One primitive + plain material per colour: every AR viewer supports this, vertex colours are patchier */
+function makeGLB(mesh){
+  const bufs=[], views=[], accessors=[], prims=[], materials=[]; let off=0;
+  const addView=(arr,target)=>{ bufs.push(arr); views.push({buffer:0,byteOffset:off,byteLength:arr.byteLength,target}); off+=arr.byteLength; return views.length-1; };
+  for(const [hex,g] of mesh.groups){
+    const n=g.pos.length/3, pos=new Float32Array(g.pos), nrm=new Float32Array(g.nrm), idx=new Uint32Array(n/4*6);
+    for(let i=0,q=0;i<n;i+=4){ idx[q++]=i; idx[q++]=i+1; idx[q++]=i+2; idx[q++]=i; idx[q++]=i+2; idx[q++]=i+3; }
+    const min=[1e9,1e9,1e9], max=[-1e9,-1e9,-1e9];
+    for(let i=0;i<pos.length;i++){ const k=i%3; if(pos[i]<min[k])min[k]=pos[i]; if(pos[i]>max[k])max[k]=pos[i]; }
+    const a0=accessors.length;
+    accessors.push({bufferView:addView(pos,34962),componentType:5126,count:n,type:'VEC3',min,max});
+    accessors.push({bufferView:addView(nrm,34962),componentType:5126,count:n,type:'VEC3'});
+    accessors.push({bufferView:addView(idx,34963),componentType:5125,count:idx.length,type:'SCALAR'});
+    const [r,gg,b]=h2rgb(hex).map(linC);
+    materials.push({name:'c'+hex.slice(1),pbrMetallicRoughness:{baseColorFactor:[r,gg,b,1],metallicFactor:0,roughnessFactor:0.85}});
+    prims.push({attributes:{POSITION:a0,NORMAL:a0+1},indices:a0+2,material:materials.length-1});
+  }
+  const json={asset:{version:'2.0',generator:'Mirror Fit'},scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0,name:'Avatar'}],
+    meshes:[{name:'Avatar',primitives:prims}], materials, accessors, bufferViews:views, buffers:[{byteLength:off}]};
+  const js=new TextEncoder().encode(JSON.stringify(json)), pad=(4-js.length%4)%4, total=12+8+js.length+pad+8+off;
+  const out=new Uint8Array(total), dv=new DataView(out.buffer);
+  dv.setUint32(0,0x46546C67,true); dv.setUint32(4,2,true); dv.setUint32(8,total,true);
+  dv.setUint32(12,js.length+pad,true); dv.setUint32(16,0x4E4F534A,true); out.set(js,20); out.fill(0x20,20+js.length,20+js.length+pad);
+  let p=20+js.length+pad; dv.setUint32(p,off,true); dv.setUint32(p+4,0x004E4942,true); p+=8;
+  for(const b of bufs){ out.set(new Uint8Array(b.buffer,b.byteOffset,b.byteLength),p); p+=b.byteLength; }
+  return out;
+}
+/* ---------- AR: the phone's camera via <model-viewer> ----------
+   Android Chrome: WebXR in the page (camera opens, avatar stands on the floor).
+   iPhone/iPad: Apple Quick Look AR (model-viewer converts the model to USDZ on the fly). */
+const arEl=$('#ar'), mv=$('#mv'), arNote=$('#arNote');
+let glbURL=null, wantAR=false;
+function refreshModel(){
+  const blob=new Blob([makeGLB(buildMesh())],{type:'model/gltf-binary'});
+  if(glbURL) URL.revokeObjectURL(glbURL);
+  glbURL=URL.createObjectURL(blob); mv.src=glbURL;
+}
+function arHelp(){
+  if(!window.isSecureContext) return 'AR needs the page to be online over https. Open it from your GitHub Pages link.';
+  if(mv.canActivateAR) return 'Tap Open camera, point your phone at the floor, and your avatar appears in the room.';
+  return 'AR works on phones: Android with Chrome, or iPhone and iPad. Open this page there. Here you can still turn the 3D model.';
+}
+function openAR(){
+  arEl.hidden=false; wantAR=true; arNote.textContent='Loading your avatar…';
+  refreshModel(); $('#arClose').focus();
+}
+mv.addEventListener('load',()=>{
+  arNote.textContent=arHelp();
+  // Still within the tap that opened this? Go straight to the camera.
+  if(wantAR && mv.canActivateAR && navigator.userActivation && navigator.userActivation.isActive){ try{ mv.activateAR(); }catch(e){} }
+  wantAR=false;
+});
+mv.addEventListener('ar-status',e=>{
+  if(e.detail.status==='failed') arNote.textContent="AR couldn't start on this device. On Android it needs Chrome and a phone with Google Play Services for AR.";
+});
+mv.addEventListener('error',()=>{ arNote.textContent="The 3D model couldn't load. Close this and try again."; });
+function closeAR(){ arEl.hidden=true; $('#arOpen').focus(); }
+$('#arOpen').addEventListener('click',openAR);
+$('#arClose').addEventListener('click',closeAR);
+arEl.addEventListener('click',e=>{ if(e.target===arEl) closeAR(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!arEl.hidden) closeAR(); });
+$('#arSize').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return; arSize=b.dataset.v;
+  $('#arSize').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b))); refreshModel();
+});
+
+/* ---------- Boot ---------- */
+drawSample();
+selectTab('top');
+layout();
+})();
+</script>
+
+</body>
+</html>
